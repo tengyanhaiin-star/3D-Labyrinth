@@ -1,0 +1,1753 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;1,400&family=Inter:wght@400&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Two-Floor Maze</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#000;overflow:hidden;font-family:'Courier Prime',Courier,monospace;touch-action:none;-webkit-touch-callout:none;}
+  #gl{display:block;position:fixed;top:0;left:0;width:100%;height:100%;}
+  #minimap{position:fixed;top:14px;right:14px;border:1px solid #0ff4;border-radius:4px;display:none;}
+  #hud{position:fixed;top:14px;left:14px;color:#0ff;font-size:13px;
+    line-height:2;text-shadow:0 0 6px #0ff;pointer-events:none;}
+  #prompt{position:fixed;top:60%;left:50%;transform:translate(-50%,-50%);
+    color:#fff;font-size:16px;font-weight:400;text-shadow:0 0 8px #000;
+    background:rgba(0,0,0,0.55);padding:8px 20px;border-radius:6px;
+    pointer-events:none;display:none;}
+  .btn{padding:7px 18px;background:#000b;border:1px solid #0ff;color:#0ff;
+    border-radius:4px;cursor:pointer;font-size:13px;transition:.15s;font-family:'Inter',sans-serif;font-weight:400;}
+  .btn:hover{background:#0ff2;}
+  #btnBack{position:fixed;top:14px;right:14px;z-index:25;}
+  #controls{position:fixed;bottom:16px;left:14px;color:#444;font-size:11px;line-height:1.9;pointer-events:none;}
+  #overlay,#winScreen{position:fixed;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:16px;background:#000d;color:#fff;z-index:30;}
+  #winScreen{display:none;}
+  h1{font-size:2rem;color:#0ff;text-shadow:0 0 16px #0ff;font-weight:400;}
+  p{color:#888;font-size:.9rem;text-align:center;line-height:1.9;}
+  .big{font-size:2.2rem;color:#0f0;text-shadow:0 0 20px #0f0;font-weight:400;}
+
+
+  /* ── Touch UI ── */
+  #touchUI{display:none;position:fixed;inset:0;pointer-events:none;z-index:20;}
+  #joystickZone{position:absolute;left:20px;bottom:28px;width:120px;height:120px;pointer-events:auto;}
+  #joystickBase{position:absolute;inset:0;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.25);}
+  #joystickKnob{position:absolute;width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.35);border:2px solid rgba(255,255,255,0.6);top:50%;left:50%;transform:translate(-50%,-50%);transition:transform .05s;}
+  #btnTurnL,#btnTurnR{position:absolute;bottom:28px;width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.3);display:flex;align-items:center;justify-content:center;font-size:24px;pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+  #btnTurnL{right:88px;left:auto;}
+  #btnTurnR{right:16px;left:auto;}
+  #btnPickup{position:absolute;bottom:28px;left:152px;transform:none;width:72px;height:72px;border-radius:50%;background:rgba(255,204,68,0.22);border:2px solid rgba(255,204,68,0.6);display:flex;align-items:center;justify-content:center;font-size:28px;pointer-events:auto;user-select:none;-webkit-user-select:none;}
+  #btnPickup.hidden{opacity:0;pointer-events:none;}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="touchUI">
+  <div id="joystickZone">
+    <div id="joystickBase"></div>
+    <div id="joystickKnob"></div>
+  </div>
+  <div id="btnTurnL">◀</div>
+  <div id="btnTurnR">▶</div>
+  <div id="btnPickup" class="hidden">KEY</div>
+</div>
+<canvas id="minimap"></canvas>
+<div id="hud">
+  ⏱ <span id="timerTxt">00:00</span> &nbsp;|&nbsp;
+  <span id="keyStatus" style="color:#ff4444">🔒 No Key</span> &nbsp;|&nbsp;
+  <span id="floorTxt" style="color:#aaa">1F</span>
+</div>
+<div id="prompt"></div>
+<div id="controls" style="display:none">WASD Move &nbsp; ←→ Turn &nbsp; E Pick Up</div>
+<button class="btn" id="btnBack">↩ Back</button>
+
+<div id="overlay">
+  <h1>🏰 Two-Floor Maze</h1>
+  <p>Find the key on Floor 2, take it back to Floor 1, and escape!<br>
+     W/A/S/D Move &nbsp;·&nbsp; ←/→ Turn &nbsp;·&nbsp; E Pick Up Key<br>
+     Walk up/down the ramp to change floors</p>
+  <button class="btn" id="btnStart">Start Game</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+
+// ══════════════════════════════════════════════
+//  Touch Controls（iOS）
+// ══════════════════════════════════════════════
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+if (isMobile) {
+  document.getElementById('touchUI').style.display = 'block';
+  document.getElementById('controls').style.display = 'none';
+}
+
+// Joystick state
+const joystick = { active: false, id: null, bx: 0, by: 0, dx: 0, dy: 0 };
+const JMAX = 45; // max offset px
+
+function setupJoystick() {
+  const zone  = document.getElementById('joystickZone');
+  const knob  = document.getElementById('joystickKnob');
+
+  function getCenter() {
+    const r = zone.getBoundingClientRect();
+    return { x: r.left + r.width/2, y: r.top + r.height/2 };
+  }
+
+  zone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    joystick.active = true; joystick.id = t.identifier;
+    // Use touch point as joystick center (avoids getBoundingClientRect returning 0 when display:none)
+    joystick.bx = t.clientX; joystick.by = t.clientY;
+    joystick.dx = 0; joystick.dy = 0;
+    knob.style.transform = 'translate(-50%,-50%)';
+  }, { passive: false });
+
+  document.addEventListener('touchmove', e => {
+    if (state && !state.won) e.preventDefault(); // Only intercept during gameplay
+    if (!joystick.active) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier !== joystick.id) continue;
+      let dx = t.clientX - joystick.bx;
+      let dy = t.clientY - joystick.by;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > JMAX) { dx = dx/dist*JMAX; dy = dy/dist*JMAX; }
+      joystick.dx = dx; joystick.dy = dy;
+      knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    }
+  }, { passive: false });
+
+  function endJoystick(e) {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joystick.id) {
+        joystick.active = false; joystick.dx = 0; joystick.dy = 0;
+        knob.style.transform = 'translate(-50%,-50%)';
+      }
+    }
+  }
+  document.addEventListener('touchend', e => {
+    if (state && !state.won) e.preventDefault(); // Only intercept during gameplay, not in menus
+    endJoystick(e);
+  }, { passive: false });
+  document.addEventListener('touchcancel', e => {
+    if (state && !state.won) e.preventDefault();
+    endJoystick(e);
+  }, { passive: false });
+}
+
+function setupTurnButtons() {
+  const btnL = document.getElementById('btnTurnL');
+  const btnR = document.getElementById('btnTurnR');
+
+  // Block all events that could trigger iOS fullscreen gesture
+  function blockAll(e) { e.preventDefault(); e.stopPropagation(); }
+
+  btnL.addEventListener('touchstart', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (state && !state.turning) {
+      state.tgtYaw = state.curYaw + Math.PI/2; state.turning = true;
+    }
+  }, { passive: false });
+  btnL.addEventListener('touchend',    blockAll, { passive: false });
+  btnL.addEventListener('touchcancel', blockAll, { passive: false });
+  btnL.addEventListener('dblclick',    blockAll, { passive: false });
+  btnL.addEventListener('click',       blockAll, { passive: false });
+
+  btnR.addEventListener('touchstart', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (state && !state.turning) {
+      state.tgtYaw = state.curYaw - Math.PI/2; state.turning = true;
+    }
+  }, { passive: false });
+  btnR.addEventListener('touchend',    blockAll, { passive: false });
+  btnR.addEventListener('touchcancel', blockAll, { passive: false });
+  btnR.addEventListener('dblclick',    blockAll, { passive: false });
+  btnR.addEventListener('click',       blockAll, { passive: false });
+}
+
+function setupPickupButton() {
+  const btn = document.getElementById('btnPickup');
+  function tryPickup(e) {
+    e.preventDefault(); e.stopPropagation();
+    if (!state || state.hasKey || state.currentFloor !== 2) return;
+    const dx = state.px - (state.keyC*CELL+CELL/2);
+    const dz = state.pz - (state.keyR*CELL+CELL/2);
+    if (Math.sqrt(dx*dx+dz*dz) < KEY_R + PLAYER_R + 0.15) pickupKey();
+  }
+  btn.addEventListener('touchstart', tryPickup, { passive: false });
+  btn.addEventListener('touchend',   e => { e.preventDefault(); e.stopPropagation(); }, { passive: false });
+}
+
+setupJoystick();
+setupTurnButtons();
+setupPickupButton();
+
+// Map joystick input to keys (read in loop)
+function applyJoystickToKeys() {
+  // Only override keys on mobile; desktop keyboard unaffected
+  if (!isMobile) return;
+  if (!joystick.active) {
+    keys['KeyW'] = keys['KeyS'] = keys['KeyA'] = keys['KeyD'] = false;
+    return;
+  }
+  const threshold = JMAX * 0.15;
+  keys['KeyW'] = joystick.dy < -threshold;
+  keys['KeyS'] = joystick.dy >  threshold;
+  keys['KeyA'] = joystick.dx < -threshold;
+  keys['KeyD'] = joystick.dx >  threshold;
+}
+
+// Show/hide pickup button (called from updatePrompt)
+function updatePickupBtn(show) {
+  const btn = document.getElementById('btnPickup');
+  if (btn) btn.classList.toggle('hidden', !show);
+}
+
+
+// ══════════════════════════════════════════════
+//  Stairway 3D Music (Twinkle Twinkle + Web Audio API)
+// ══════════════════════════════════════════════
+let _sfxCtx = null, _stairMusic = null;
+function getSfxCtx() {
+  if (!_sfxCtx) _sfxCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return _sfxCtx;
+}
+// Twinkle Twinkle, C major, BPM=100
+const LIEBESTRAUM_NOTES = [
+  [261.63,1],[261.63,1],[392.00,1],[392.00,1],[440.00,1],[440.00,1],[392.00,2],
+  [349.23,1],[349.23,1],[329.63,1],[329.63,1],[293.66,1],[293.66,1],[261.63,2],
+  [392.00,1],[392.00,1],[349.23,1],[349.23,1],[329.63,1],[329.63,1],[293.66,2],
+  [392.00,1],[392.00,1],[349.23,1],[349.23,1],[329.63,1],[329.63,1],[293.66,2],
+  [261.63,1],[261.63,1],[392.00,1],[392.00,1],[440.00,1],[440.00,1],[392.00,2],
+  [349.23,1],[349.23,1],[329.63,1],[329.63,1],[293.66,1],[293.66,1],[261.63,2],
+];
+const BEAT = 60 / 100;
+function _scheduleMusic(ctx, panner, startTime) {
+  let t = startTime;
+  for (const [freq, beats] of LIEBESTRAUM_NOTES) {
+    const dur = beats * BEAT;
+    const osc = ctx.createOscillator(); osc.type='sine'; osc.frequency.value=freq;
+    const osc2 = ctx.createOscillator(); osc2.type='triangle'; osc2.frequency.value=freq*2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.45,t+0.02);
+    g.gain.setValueAtTime(0.45,t+dur*0.6); g.gain.exponentialRampToValueAtTime(0.001,t+dur*0.95);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0,t); g2.gain.linearRampToValueAtTime(0.10,t+0.02);
+    g2.gain.exponentialRampToValueAtTime(0.001,t+dur*0.7);
+    osc.connect(g); g.connect(panner); osc2.connect(g2); g2.connect(panner);
+    osc.start(t); osc.stop(t+dur); osc2.start(t); osc2.stop(t+dur);
+    t += dur;
+  }
+  return t;
+}
+function startStairMusic(sx, sy, sz) {
+  if (_stairMusic) return;
+  const ctx = getSfxCtx();
+  ctx.resume(); // resume if previously suspended
+  const panner = ctx.createPanner();
+  panner.panningModel='HRTF'; panner.distanceModel='inverse';
+  panner.refDistance=1.5; panner.maxDistance=CELL*10;
+  panner.rolloffFactor=2.0; panner.coneInnerAngle=360; panner.coneOuterAngle=360;
+  if (panner.positionX) { panner.positionX.value=sx; panner.positionY.value=sy; panner.positionZ.value=sz; }
+  else { panner.setPosition(sx,sy,sz); }
+  const reverbLen=ctx.sampleRate*1.5, reverbBuf=ctx.createBuffer(2,reverbLen,ctx.sampleRate);
+  for (let ch=0;ch<2;ch++) {
+    const d=reverbBuf.getChannelData(ch);
+    for (let i=0;i<reverbLen;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/reverbLen,2.5);
+  }
+  const convolver=ctx.createConvolver(); convolver.buffer=reverbBuf;
+  const reverbGain=ctx.createGain(); reverbGain.gain.value=0.22;
+  const dryGain=ctx.createGain(); dryGain.gain.value=0.85;
+  panner.connect(dryGain); dryGain.connect(ctx.destination);
+  panner.connect(convolver); convolver.connect(reverbGain); reverbGain.connect(ctx.destination);
+  _stairMusic={ctx,panner,tid:null};
+  function loop(startT) {
+    const endT=_scheduleMusic(ctx,panner,startT);
+    const delay=(endT-ctx.currentTime-0.15)*1000;
+    _stairMusic.tid=setTimeout(()=>{ if(_stairMusic) loop(endT); },Math.max(0,delay));
+  }
+  loop(ctx.currentTime+0.05);
+}
+function stopStairMusic() {
+  if (!_stairMusic) return;
+  clearTimeout(_stairMusic.tid);
+  // Close AudioContext to destroy all scheduled nodes
+  try { _stairMusic.ctx.close(); } catch(e) {}
+  _stairMusic = null;
+  _sfxCtx = null; // will be recreated next time
+}
+function updateListenerPos(px,py,pz,yaw) {
+  if (!_stairMusic) return;
+  const L=_stairMusic.ctx.listener, fx=-Math.sin(yaw), fz=-Math.cos(yaw);
+  if (L.positionX) {
+    L.positionX.value=px; L.positionY.value=py; L.positionZ.value=pz;
+    L.forwardX.value=fx; L.forwardY.value=0; L.forwardZ.value=fz;
+    L.upX.value=0; L.upY.value=1; L.upZ.value=0;
+  } else { L.setPosition(px,py,pz); L.setOrientation(fx,0,fz,0,1,0); }
+}
+
+// ══════════════════════════════════════════════
+//  World Parameters
+// ══════════════════════════════════════════════
+const GRID   = 14;          // maze grid size
+const CELL   = 4;           // world units per cell
+const WALL_H = 3.0;         // wall height
+const WALL_T = 0.22;        // wall thickness
+const W2     = GRID * CELL; // total maze width
+
+const F1_Y   = 0;           // floor 1 ground Y
+const F2_Y   = WALL_H + 0.5;// floor 2 ground Y
+const EYE_H  = 0.85;        // eye height above floor
+const SPD    = 5.5;         // move speed
+const TURN_SPD = 9;         // turn speed
+const PLAYER_R = 0.25;      // collision radius
+
+// ══════════════════════════════════════════════
+//  Three.js Setup
+// ══════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({
+  canvas: document.getElementById('gl'), antialias: true
+});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.shadowMap.enabled = false;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000010);
+scene.fog = new THREE.Fog(0x000010, 14, 52);
+
+const cam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 90);
+
+function onResize() {
+  // Read canvas CSS size (most reliable)
+  const canvas = renderer.domElement;
+  const W = canvas.clientWidth;
+  const H = canvas.clientHeight;
+  if (W === 0 || H === 0) return;
+  renderer.setSize(W, H, false); // false = do not modify canvas CSS size
+  cam.aspect = W / H;
+  cam.updateProjectionMatrix();
+}
+// ResizeObserver is more reliable than resize/orientationchange on iOS
+if (window.ResizeObserver) {
+  new ResizeObserver(onResize).observe(renderer.domElement);
+} else {
+  window.addEventListener('resize', () => requestAnimationFrame(onResize));
+  window.addEventListener('orientationchange', () =>
+    setTimeout(onResize, 200));
+}
+
+// ══════════════════════════════════════════════
+//  Texture Generation (Canvas, dungeon style)
+// ══════════════════════════════════════════════
+
+// Simple seeded PRNG for stable textures
+function seededRand(seed) {
+  let s = seed;
+  return function() { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
+}
+
+// Stone brick wall texture (grout, relief, stains)
+function makeWallTex(baseColor, groutColor, stainColor, seed) {
+  const S = 256;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const rng = seededRand(seed);
+
+  // base color
+  ctx.fillStyle = baseColor; ctx.fillRect(0, 0, S, S);
+
+  // brick layout: 32px high, 64px wide, offset rows
+  const BH = 32, BW = 64, GROUT = 3;
+  const rows = Math.ceil(S / BH) + 1;
+
+  for (let row = 0; row < rows; row++) {
+    const offsetX = (row % 2 === 0) ? 0 : BW / 2;
+    const y = row * BH;
+    const cols = Math.ceil((S + BW) / BW) + 1;
+
+    for (let col = 0; col < cols; col++) {
+      const x = col * BW - offsetX;
+      const bx = x + GROUT / 2, by = y + GROUT / 2;
+      const bw = BW - GROUT, bh = BH - GROUT;
+
+      // random brightness per brick
+      const bright = 0.82 + rng() * 0.36;
+      ctx.save();
+      ctx.globalAlpha = 0.18 + rng() * 0.22;
+      ctx.fillStyle = rng() > 0.5 ? '#ffffff' : '#000000';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.restore();
+
+      // brick highlight edges (top/left bright, bottom/right dark)
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(bx, by, bw, 2);
+      ctx.fillRect(bx, by, 2, bh);
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(bx, by + bh - 2, bw, 2);
+      ctx.fillRect(bx + bw - 2, by, 2, bh);
+      ctx.restore();
+
+      // random stain/moss spots
+      if (rng() < 0.35) {
+        ctx.save();
+        ctx.globalAlpha = 0.12 + rng() * 0.18;
+        ctx.fillStyle = stainColor;
+        const sx = bx + rng() * bw * 0.6, sy = by + rng() * bh * 0.6;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, 4 + rng() * 10, 3 + rng() * 8, rng() * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // horizontal grout lines
+    ctx.fillStyle = groutColor;
+    ctx.fillRect(0, y, S, GROUT);
+  }
+
+  // vertical grout lines (offset per row)
+  for (let row = 0; row < rows; row++) {
+    const offsetX = (row % 2 === 0) ? 0 : BW / 2;
+    const cols = Math.ceil((S + BW) / BW) + 1;
+    for (let col = 0; col <= cols; col++) {
+      const x = col * BW - offsetX;
+      ctx.fillStyle = groutColor;
+      ctx.fillRect(x, row * BH, GROUT, BH);
+    }
+  }
+
+  // global noise overlay (grain)
+  const imgData = ctx.getImageData(0, 0, S, S);
+  const d = imgData.data;
+  const rng2 = seededRand(seed + 99);
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (rng2() - 0.5) * 28;
+    d[i] = Math.max(0, Math.min(255, d[i] + n));
+    d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
+    d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1, 1);
+  return t;
+}
+
+// Stone floor texture (flagstones with cracks and stains)
+function makeFloorTex(baseColor, groutColor, stainColor, seed) {
+  const S = 256;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const rng = seededRand(seed);
+
+  ctx.fillStyle = baseColor; ctx.fillRect(0, 0, S, S);
+
+  // 64x64 px flagstones, no offset
+  const TW = 64, TH = 64, GROUT = 2;
+  const rows = Math.ceil(S / TH) + 1;
+  const cols = Math.ceil(S / TW) + 1;
+
+  for (let r = 0; r < rows; r++) {
+    for (let col2 = 0; col2 < cols; col2++) {
+      const x = col2 * TW + GROUT / 2, y = r * TH + GROUT / 2;
+      const tw = TW - GROUT, th = TH - GROUT;
+
+      // subtle color variation per stone
+      ctx.save();
+      ctx.globalAlpha = 0.12 + rng() * 0.20;
+      ctx.fillStyle = rng() > 0.5 ? '#ffffff' : '#000000';
+      ctx.fillRect(x, y, tw, th);
+      ctx.restore();
+
+      // occasional internal cracks
+      if (rng() < 0.3) {
+        ctx.save();
+        ctx.globalAlpha = 0.12 + rng() * 0.1;
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + rng() * tw, y + rng() * th);
+        ctx.lineTo(x + rng() * tw, y + rng() * th);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // water stains / dirt
+      if (rng() < 0.4) {
+        ctx.save();
+        ctx.globalAlpha = 0.08 + rng() * 0.14;
+        ctx.fillStyle = stainColor;
+        ctx.beginPath();
+        ctx.ellipse(x + tw * 0.5, y + th * 0.5, 8 + rng() * 18, 6 + rng() * 16, rng() * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  // grout lines
+  ctx.fillStyle = groutColor;
+  for (let r = 0; r <= rows; r++) ctx.fillRect(0, r * TH, S, GROUT);
+  for (let col2 = 0; col2 <= cols; col2++) ctx.fillRect(col2 * TW, 0, GROUT, S);
+
+  // noise
+  const imgData = ctx.getImageData(0, 0, S, S);
+  const d = imgData.data;
+  const rng2 = seededRand(seed + 77);
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (rng2() - 0.5) * 22;
+    d[i] = Math.max(0, Math.min(255, d[i] + n));
+    d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
+    d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(3, 3);
+  return t;
+}
+
+// Ceiling texture (rough plaster, cracks, water streaks)
+function makeCeilTex(baseColor, stainColor, seed) {
+  const S = 256;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const rng = seededRand(seed);
+
+  ctx.fillStyle = baseColor; ctx.fillRect(0, 0, S, S);
+
+  // random cracks
+  for (let i = 0; i < 12; i++) {
+    ctx.save();
+    ctx.globalAlpha = 0.10 + rng() * 0.12;
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 0.8 + rng() * 1.2;
+    ctx.beginPath();
+    let cx2 = rng() * S, cy2 = rng() * S;
+    ctx.moveTo(cx2, cy2);
+    for (let j = 0; j < 4; j++) {
+      cx2 += (rng() - 0.5) * 40; cy2 += (rng() - 0.5) * 40;
+      ctx.lineTo(cx2, cy2);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // water streaks (vertical dark lines)
+  for (let i = 0; i < 6; i++) {
+    ctx.save();
+    ctx.globalAlpha = 0.06 + rng() * 0.10;
+    ctx.fillStyle = stainColor;
+    const sx = rng() * S;
+    ctx.fillRect(sx, 0, 2 + rng() * 4, S * (0.3 + rng() * 0.7));
+    ctx.restore();
+  }
+
+  // noise
+  const imgData = ctx.getImageData(0, 0, S, S);
+  const d = imgData.data;
+  const rng2 = seededRand(seed + 55);
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (rng2() - 0.5) * 30;
+    d[i] = Math.max(0, Math.min(255, d[i] + n));
+    d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
+    d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(3, 3);
+  return t;
+}
+
+// Wood ramp texture (plank seams and nails)
+function makeRampTex(seed) {
+  const S = 256;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const rng = seededRand(seed);
+
+  // light wood base
+  ctx.fillStyle = '#5a3a18'; ctx.fillRect(0, 0, S, S);
+
+  const PLANK_W = 32;
+  for (let x = 0; x < S; x += PLANK_W) {
+    ctx.save();
+    ctx.globalAlpha = 0.18 + rng() * 0.20;
+    ctx.fillStyle = rng() > 0.5 ? '#ffffff' : '#7a4010';
+    ctx.fillRect(x, 0, PLANK_W, S);
+    ctx.restore();
+
+    // wood grain lines
+    for (let y = 0; y < S; y += 3 + Math.floor(rng() * 4)) {
+      ctx.save();
+      ctx.globalAlpha = 0.12 + rng() * 0.18;
+      ctx.fillStyle = rng() > 0.6 ? '#f0a050' : '#7a3a08';
+      ctx.fillRect(x, y, PLANK_W, 1 + rng() * 2);
+      ctx.restore();
+    }
+
+    // highlight edges (raised planks)
+    ctx.save();
+    ctx.globalAlpha = 0.30;
+    ctx.fillStyle = '#ffe0a0';
+    ctx.fillRect(x + 1, 0, 2, S);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#3a1800';
+    ctx.fillRect(x + PLANK_W - 2, 0, 2, S);
+    ctx.restore();
+  }
+
+  // dark plank seam lines
+  for (let x = 0; x < S; x += PLANK_W) {
+    ctx.fillStyle = '#3a1a00';
+    ctx.fillRect(x, 0, 2, S);
+  }
+
+  // nails (visible grey dots)
+  for (let y = 20; y < S; y += 40) {
+    for (let x = 16; x < S; x += PLANK_W) {
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = '#d0c0a0';
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // noise
+  const imgData = ctx.getImageData(0, 0, S, S);
+  const d = imgData.data;
+  const rng2 = seededRand(seed + 33);
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (rng2() - 0.5) * 14;
+    d[i]   = Math.max(0, Math.min(255, d[i]   + n));
+    d[i+1] = Math.max(0, Math.min(255, d[i+1] + n * 0.7));
+    d[i+2] = Math.max(0, Math.min(255, d[i+2] + n * 0.3));
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(2, 1);
+  return t;
+}
+
+// Exit door texture (iron gate)
+function makeExitTex(locked, seed) {
+  const S = 256;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const rng = seededRand(seed);
+
+  const baseColor = locked ? '#5a2218' : '#184a2a';
+  const barColor  = locked ? '#8a4030' : '#2a7a48';
+  const rustColor = locked ? '#a05028' : '#30a060';
+
+  ctx.fillStyle = baseColor; ctx.fillRect(0, 0, S, S);
+
+  // horizontal bars
+  for (let y = 12; y < S; y += 32) {
+    ctx.fillStyle = barColor;
+    ctx.fillRect(0, y, S, 10);
+    // highlight
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, y + 1, S, 2);
+    ctx.restore();
+  }
+
+  // vertical reinforcement bars
+  for (const x of [S * 0.25, S * 0.5, S * 0.75]) {
+    ctx.fillStyle = barColor;
+    ctx.fillRect(x - 5, 0, 10, S);
+  }
+
+  // rust spots
+  for (let i = 0; i < 20; i++) {
+    ctx.save();
+    ctx.globalAlpha = 0.12 + rng() * 0.18;
+    ctx.fillStyle = rustColor;
+    ctx.beginPath();
+    ctx.arc(rng() * S, rng() * S, 3 + rng() * 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // keyhole / unlock symbol
+  ctx.save();
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = locked ? '#ffcc44' : '#44ffaa';
+  const cx2 = S / 2, cy2 = S / 2;
+  ctx.beginPath(); ctx.arc(cx2, cy2 - 12, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = baseColor;
+  ctx.beginPath(); ctx.arc(cx2, cy2 - 12, 5, 0, Math.PI * 2); ctx.fill();
+  if (locked) {
+    ctx.fillStyle = '#ffcc44';
+    ctx.fillRect(cx2 - 7, cy2 - 12, 14, 20);
+  } else {
+    ctx.fillStyle = '#44ffaa';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('✓', cx2, cy2 + 10);
+  }
+  ctx.restore();
+
+  // noise
+  const imgData = ctx.getImageData(0, 0, S, S);
+  const d = imgData.data;
+  const rng2 = seededRand(seed + 11);
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (rng2() - 0.5) * 24;
+    d[i] = Math.max(0, Math.min(255, d[i] + n));
+    d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
+    d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1, 1);
+  return t;
+}
+
+// ══════════════════════════════════════════════
+//  Materials (MeshStandardMaterial + Canvas textures)
+// ══════════════════════════════════════════════
+function makeMat(map, color, roughness, metalness, extraOpts, wallOffset) {
+  const base = { map, color, roughness, metalness };
+  if (wallOffset) {
+    base.polygonOffset = true;
+    base.polygonOffsetFactor = 1;
+    base.polygonOffsetUnits = 1;
+  }
+  return new THREE.MeshStandardMaterial(Object.assign(base, extraOpts || {}));
+}
+
+const MAT = {
+  // Floor 1: cool blue stone
+  wall1: makeMat(makeWallTex('#3a4a6a', '#1a2030', '#2a5a2a', 1001), 0x8899bb, 0.92, 0.05, null, true),
+  // Floor 2: purple stone (aged)
+  wall2: makeMat(makeWallTex('#4a2a5a', '#1a1020', '#3a1a5a', 1002), 0xaa88cc, 0.95, 0.04, null, true),
+  // Floor 1: dark blue-grey flagstone
+  floor1: makeMat(makeFloorTex('#2a2e3e', '#111520', '#102010', 2001), 0x8899aa, 0.88, 0.06),
+  // Floor 2: dark purple flagstone
+  floor2: makeMat(makeFloorTex('#251828', '#100c18', '#1a0a30', 2002), 0xaa88bb, 0.90, 0.05),
+  // Floor 1: rough grey plaster ceiling
+  ceil1: makeMat(makeCeilTex('#222230', '#0a0c20', 3001), 0x7788aa, 0.97, 0.02),
+  // Floor 2: dark purple-grey ceiling
+  ceil2: makeMat(makeCeilTex('#1e1428', '#0c0818', 3002), 0xaa88bb, 0.97, 0.02),
+  // ramp: wood planks
+  ramp: makeMat(makeRampTex(4001), 0xddbb88, 0.75, 0.08, { side: THREE.DoubleSide, emissive: new THREE.Color(0x6b3a10), emissiveIntensity: 0.35 }),
+  rampSide: makeMat(null, 0x3a2008, 0.85, 0.05),
+  // exit
+  exitLocked:   makeMat(makeExitTex(true,  5001), 0xcc6644, 0.70, 0.30),
+  exitUnlocked: makeMat(makeExitTex(false, 5002), 0x44cc88, 0.65, 0.35),
+};
+
+// ══════════════════════════════════════════════
+//  Game State
+// ══════════════════════════════════════════════
+let state = null; // see initState()
+
+function initState() {
+  return {
+    // maze data
+    hWall1: null, vWall1: null,  // floor 1 h/v walls
+    hWall2: null, vWall2: null,  // floor 2
+    stairR: 0, stairC: 0,        // stairwell cell
+    rampDir: 'N',                 // ramp entry direction
+    exitSide: 'S', exitIdx: 0,   // exit
+    startR: 0, startC: 0,        // start position
+    keyR: 0, keyC: 0,            // key position
+
+    // player
+    px: 0, pz: 0,
+    playerY: F1_Y,     // playerfloorY（）
+    curYaw: 0, tgtYaw: 0, turning: false,
+    currentFloor: 1,
+
+    // items
+    hasKey: false,
+
+    // timer
+    startTime: 0,
+    won: false,
+
+    // Three.js objects
+    sceneRoot: null,
+    headLight: null,
+    keySprite: null,
+    rampParams: null,  // Ramp geometry params cache
+
+    // collision walls (XZ AABB list)
+    walls1: [],
+    walls2: [],
+  };
+}
+
+// ══════════════════════════════════════════════
+//  Maze Generation (recursive backtracker)
+// ══════════════════════════════════════════════
+function genMazeWalls(seed) {
+  const hWall = Array.from({length: GRID-1}, () => Array(GRID).fill(true));
+  const vWall = Array.from({length: GRID},   () => Array(GRID-1).fill(true));
+  const vis   = Array.from({length: GRID},   () => Array(GRID).fill(false));
+  function dfs(r, c) {
+    vis[r][c] = true;
+    const dirs = [[0,1],[0,-1],[1,0],[-1,0]].sort(() => Math.random() - 0.5);
+    for (const [dr, dc] of dirs) {
+      const nr = r+dr, nc = c+dc;
+      if (nr<0||nr>=GRID||nc<0||nc>=GRID||vis[nr][nc]) continue;
+      if (dr===1)  hWall[r][c]  = false;
+      if (dr===-1) hWall[nr][c] = false;
+      if (dc===1)  vWall[r][c]  = false;
+      if (dc===-1) vWall[r][nc] = false;
+      dfs(nr, nc);
+    }
+  }
+  dfs(0, 0);
+  return { hWall, vWall };
+}
+
+// BFS distance field from (sr,sc)
+function bfs(hWall, vWall, sr, sc) {
+  const dist = Array.from({length:GRID}, () => Array(GRID).fill(-1));
+  const q = [[sr, sc]];
+  dist[sr][sc] = 0;
+  while (q.length) {
+    const [r, c] = q.shift();
+    for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nr = r+dr, nc = c+dc;
+      if (nr<0||nr>=GRID||nc<0||nc>=GRID||dist[nr][nc]!==-1) continue;
+      const blocked =
+        (dr===1  && hWall[r][c])  || (dr===-1 && hWall[nr][c]) ||
+        (dc===1  && vWall[r][c])  || (dc===-1 && vWall[r][nc]);
+      if (!blocked) { dist[nr][nc] = dist[r][c]+1; q.push([nr,nc]); }
+    }
+  }
+  return dist;
+}
+
+function farthest(dist) {
+  let br=0, bc=0, bd=0;
+  for (let r=0;r<GRID;r++) for (let c=0;c<GRID;c++)
+    if (dist[r][c] > bd) { bd=dist[r][c]; br=r; bc=c; }
+  return {r:br, c:bc, d:bd};
+}
+
+function setupMaze(s) {
+  // generate two floors
+  const m1 = genMazeWalls(); s.hWall1 = m1.hWall; s.vWall1 = m1.vWall;
+  const m2 = genMazeWalls(); s.hWall2 = m2.hWall; s.vWall2 = m2.vWall;
+
+  // floor 1: BFS from (0,0) to find farthest cell for exit
+  const d1 = bfs(s.hWall1, s.vWall1, 0, 0);
+  const far1 = farthest(d1);
+
+  // place exit on the edge closest to farthest cell
+  const er = far1.r, ec = far1.c;
+  if (er === 0)        { s.exitSide='N'; s.exitIdx=ec; }
+  else if (er===GRID-1){ s.exitSide='S'; s.exitIdx=ec; }
+  else if (ec === 0)   { s.exitSide='W'; s.exitIdx=er; }
+  else                 { s.exitSide='E'; s.exitIdx=er; }
+
+  // start: farthest from exit
+  const dExit = bfs(s.hWall1, s.vWall1, er, ec);
+  const startPt = farthest(dExit);
+  s.startR = startPt.r; s.startC = startPt.c;
+
+  // stairwell: cell far from both start and exit
+  const dStart = bfs(s.hWall1, s.vWall1, s.startR, s.startC);
+  let bestStair = null, bestScore = -1;
+  for (let r=1; r<GRID-1; r++) for (let c=1; c<GRID-1; c++) {
+    if (r===er&&c===ec) continue;
+    if (r===s.startR&&c===s.startC) continue;
+    const score = Math.min(dStart[r][c], dExit[r][c]);
+    if (score > bestScore) { bestScore=score; bestStair={r,c}; }
+  }
+  if (!bestStair) bestStair = {r: Math.floor(GRID/2), c: Math.floor(GRID/2)};
+  s.stairR = bestStair.r; s.stairC = bestStair.c;
+
+  // ramp direction: pick open side of stairwell cell
+  s.rampDir = getRampEntryDir(s, s.stairR, s.stairC);
+
+  // key: farthest cell from stairwell on floor 2
+  const d2 = bfs(s.hWall2, s.vWall2, s.stairR, s.stairC);
+  const keyPt = farthest(d2);
+  s.keyR = keyPt.r; s.keyC = keyPt.c;
+
+  // precompute ramp params
+  s.rampParams = calcRampParams(s);
+}
+
+// Ramp entry dir: first open side of stairwell cell
+function getRampEntryDir(s, sr, sc) {
+  // check which sides have no wall
+  const open = {
+    N: sr>0      && !s.hWall1[sr-1][sc],
+    S: sr<GRID-1 && !s.hWall1[sr][sc],
+    W: sc>0      && !s.vWall1[sr][sc-1],
+    E: sc<GRID-1 && !s.vWall1[sr][sc],
+  };
+  // prefer open direction; ramp bottom faces opening
+  for (const dir of ['N','S','W','E']) {
+    if (open[dir]) return dir;
+  }
+  return 'N';
+}
+
+// Ramp geometry params
+function calcRampParams(s) {
+  const cx = s.stairC * CELL + CELL/2;
+  const cz = s.stairR * CELL + CELL/2;
+  const dir = s.rampDir;
+  const H  = F2_Y - F1_Y;
+  const RW = CELL * 0.50;
+
+  // ramp ends inset 0.25*CELL from cell boundary
+  const margin = CELL * 0.25;
+
+  const zNear = s.stairR * CELL + margin;       // cell north boundary inset
+  const zFar  = (s.stairR + 1) * CELL - margin; // cell south boundary inset
+  const xNear = s.stairC * CELL + margin;
+  const xFar  = (s.stairC + 1) * CELL - margin;
+
+  let botX, botZ, topX, topZ;
+
+  if (dir === 'N') {
+    botZ = zNear; topZ = zFar;   // bot=north, top=south
+    botX = topX = cx;
+  } else if (dir === 'S') {
+    botZ = zFar;  topZ = zNear;  // bot=south, top=north
+    botX = topX = cx;
+  } else if (dir === 'W') {
+    botX = xNear; topX = xFar;   // bot=west, top=east
+    botZ = topZ = cz;
+  } else { // E
+    botX = xFar;  topX = xNear;  // bot=east, top=west
+    botZ = topZ = cz;
+  }
+
+  const RL  = Math.hypot(topX - botX, topZ - botZ); // actual ramp length
+  const midX = (botX + topX) / 2;
+  const midZ = (botZ + topZ) / 2;
+  const midY = (F1_Y + F2_Y) / 2;
+  const angle = Math.atan2(H, RL);
+
+  return { cx, cz, dir, botX, botZ, topX, topZ,
+           midX, midY, midZ, H, RL, RW, angle };
+}
+
+// Get ground Y on ramp at (px,pz), null if not on ramp
+// t must be in [0,1] (entry from bot end only)
+function getRampSurfaceY(rp, px, pz) {
+  const { dir, botX, botZ, topX, topZ, H, RW } = rp;
+  const hw = RW / 2 + 0.02; // small lateral margin
+  let t;
+  if (dir === 'N' || dir === 'S') {
+    if (Math.abs(px - rp.cx) > hw) return null;
+    const denom = topZ - botZ;
+    if (Math.abs(denom) < 0.001) return null;
+    t = (pz - botZ) / denom;
+  } else {
+    if (Math.abs(pz - rp.cz) > hw) return null;
+    const denom = topX - botX;
+    if (Math.abs(denom) < 0.001) return null;
+    t = (px - botX) / denom;
+  }
+  // strict interval: outside [0,1] = not on ramp
+  if (t < 0 || t > 1) return null;
+  return F1_Y + t * H;
+}
+
+// ══════════════════════════════════════════════
+//  Collision Wall Builder
+// ══════════════════════════════════════════════
+function buildCollisionWalls(hWall, vWall, exitSide, exitIdx, locked) {
+  const walls = [];
+  const H = WALL_T / 2;
+  // inner walls
+  for (let r=0; r<GRID-1; r++) for (let c=0; c<GRID; c++)
+    if (hWall[r][c]) walls.push([c*CELL-H, (c+1)*CELL+H, (r+1)*CELL-H, (r+1)*CELL+H]);
+  for (let r=0; r<GRID; r++) for (let c=0; c<GRID-1; c++)
+    if (vWall[r][c]) walls.push([(c+1)*CELL-H, (c+1)*CELL+H, r*CELL-H, (r+1)*CELL+H]);
+  // outer walls
+  const B = WALL_T, gs = exitIdx*CELL, ge = (exitIdx+1)*CELL;
+  const addOuter = (side, horiz) => {
+    const isExit = side === exitSide;
+    if (horiz) {
+      const z = (side==='N') ? 0 : W2;
+      if (!isExit || locked) { walls.push([-B, W2+B, z-B, z+B]); return; }
+      if (gs > 0)  walls.push([-B, gs, z-B, z+B]);
+      if (ge < W2) walls.push([ge, W2+B, z-B, z+B]);
+    } else {
+      const x = (side==='W') ? 0 : W2;
+      if (!isExit || locked) { walls.push([x-B, x+B, -B, W2+B]); return; }
+      if (gs > 0)  walls.push([x-B, x+B, -B, gs]);
+      if (ge < W2) walls.push([x-B, x+B, ge, W2+B]);
+    }
+  };
+  addOuter('N', true); addOuter('S', true);
+  addOuter('W', false); addOuter('E', false);
+  return walls;
+}
+
+function collidesWalls(px, pz, walls) {
+  const r = PLAYER_R;
+  for (const [x0,x1,z0,z1] of walls)
+    if (px+r>x0 && px-r<x1 && pz+r>z0 && pz-r<z1) return true;
+  return false;
+}
+
+// key collision radius (world units)
+const KEY_R = 0.3;
+function keyAABB(s) {
+  const kx = s.keyC * CELL + CELL / 2;
+  const kz = s.keyR * CELL + CELL / 2;
+  return [kx - KEY_R, kx + KEY_R, kz - KEY_R, kz + KEY_R];
+}
+function addKeyWall(s) {
+  if (!s.hasKey) s.walls2.push(keyAABB(s));
+}
+function removeKeyWall(s) {
+  const [ax, bx, az, bz] = keyAABB(s);
+  s.walls2 = s.walls2.filter(([x0,x1,z0,z1]) =>
+    !(x0===ax && x1===bx && z0===az && z1===bz));
+}
+
+
+// ══════════════════════════════════════════════
+//  Scene Builder (both floors, different Y offsets)
+// ══════════════════════════════════════════════
+// Horizontal single-face Plane (floor/ceiling, zero thickness)
+function mkPlane(grp, w, d, mat, x, y, z, faceDown) {
+  const TEX_WORLD = 2.0;
+  const TEX_RU = Math.round(w / TEX_WORLD * 100) / 100;
+  const TEX_RV = Math.round(d / TEX_WORLD * 100) / 100;
+  const m2 = _cachedMat(mat, TEX_RU, TEX_RV) || mat;
+  if (m2 !== mat) m2.side = THREE.DoubleSide;
+  const geo = new THREE.PlaneGeometry(w, d);
+  const mesh = new THREE.Mesh(geo, m2);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, y, z);
+  grp.add(mesh);
+}
+
+// Material cache: one instance per texture+repeat combo
+const _matCache = new Map();
+function _cachedMat(mat, ru, rv) {
+  if (!mat || !mat.map) return mat;
+  // key = uuid + repeat
+  const key = mat.uuid + '|' + ru.toFixed(3) + '|' + rv.toFixed(3);
+  if (_matCache.has(key)) return _matCache.get(key);
+  const c = mat.clone();
+  c.map = mat.map.clone();
+  c.map.repeat.set(ru, rv);
+  c.map.needsUpdate = true;
+  _matCache.set(key, c);
+  return c;
+}
+// clear cache before each buildScene
+function clearMatCache() { _matCache.clear(); }
+
+// set UV repeat per face based on actual dimensions
+function mkBox(grp, w, h, d, mat, x, y, z) {
+  const TEX_WORLD = 2.0;
+  const ru = (v) => Math.round(v / TEX_WORLD * 100) / 100; // round for fewer cache keys
+  const mats = [
+    _cachedMat(mat, ru(d), ru(h)), // +X
+    _cachedMat(mat, ru(d), ru(h)), // -X
+    _cachedMat(mat, ru(w), ru(d)), // +Y
+    _cachedMat(mat, ru(w), ru(d)), // -Y
+    _cachedMat(mat, ru(w), ru(h)), // +Z
+    _cachedMat(mat, ru(w), ru(h)), // -Z
+  ];
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats);
+  m.position.set(x, y, z);
+  grp.add(m);
+}
+
+function buildFloorGeometry(s, grp, floorNum) {
+  const isF1   = floorNum === 1;
+  const hWall  = isF1 ? s.hWall1 : s.hWall2;
+  const vWall  = isF1 ? s.vWall1 : s.vWall2;
+  const floorY = isF1 ? F1_Y : F2_Y;
+  const wMat   = isF1 ? MAT.wall1 : MAT.wall2;
+  const fMat   = isF1 ? MAT.floor1 : MAT.floor2;
+  const cMat   = isF1 ? MAT.ceil1  : MAT.ceil2;
+  const ceilY  = floorY + WALL_H;
+
+  // hole coords match ramp XZ, inset to hide edge gaps
+  const rp = s.rampParams;
+  const rdir = rp.dir;
+  const hw = rp.RW / 2;
+  const shrink = 0.04; // inset to eliminate edge artifacts
+  let hx0, hx1, hz0, hz1;
+  if (rdir === 'N' || rdir === 'S') {
+    hx0 = rp.cx - hw + shrink;
+    hx1 = rp.cx + hw - shrink;
+    hz0 = Math.min(rp.botZ, rp.topZ) + shrink;
+    hz1 = Math.max(rp.botZ, rp.topZ) - shrink;
+  } else {
+    hz0 = rp.cz - hw + shrink;
+    hz1 = rp.cz + hw - shrink;
+    hx0 = Math.min(rp.botX, rp.topX) + shrink;
+    hx1 = Math.max(rp.botX, rp.topX) - shrink;
+  }
+  const hW = hx1 - hx0, hD = hz1 - hz0;
+
+  // cut hole [hx0,hx1]x[hz0,hz1] in plane at posY
+  function planeWithHole(mat, posY, thick, faceDown) {
+    if (hx0 > 0)   mkPlane(grp, hx0,      W2,       mat, hx0/2,        posY, W2/2,       faceDown);
+    if (hx1 < W2)  mkPlane(grp, W2-hx1,   W2,       mat, (hx1+W2)/2,   posY, W2/2,       faceDown);
+    if (hz0 > 0)   mkPlane(grp, hW,       hz0,      mat, (hx0+hx1)/2,  posY, hz0/2,      faceDown);
+    if (hz1 < W2)  mkPlane(grp, hW,       W2-hz1,   mat, (hx0+hx1)/2,  posY, (hz1+W2)/2, faceDown);
+  }
+
+  // floor
+  if (isF1) {
+    mkPlane(grp, W2+0.5, W2+0.5, fMat, W2/2, floorY, W2/2);
+  } else {
+    planeWithHole(fMat, floorY, 0.03);
+    // thin ceiling layer just below floor 2 (visible from floor 1)
+    // shows ceiling texture when looking up from floor 1
+    const THICKNESS = 0.05;
+    planeWithHole(isF1 ? MAT.ceil1 : MAT.ceil1, floorY - THICKNESS, 0.03);
+  }
+
+  // ceiling
+  if (isF1) {
+    planeWithHole(cMat, ceilY, 0.03, true);
+  } else {
+    mkPlane(grp, W2+0.5, W2+0.5, cMat, W2/2, ceilY, W2/2, true);
+  }
+
+  // inner walls
+  for (let r=0; r<GRID-1; r++) for (let c=0; c<GRID; c++)
+    if (hWall[r][c])
+      mkBox(grp, CELL+WALL_T, WALL_H, WALL_T, wMat,
+            c*CELL+CELL/2, floorY+WALL_H/2, (r+1)*CELL);
+  for (let r=0; r<GRID; r++) for (let c=0; c<GRID-1; c++)
+    if (vWall[r][c])
+      mkBox(grp, WALL_T, WALL_H, CELL+WALL_T, wMat,
+            (c+1)*CELL, floorY+WALL_H/2, r*CELL+CELL/2);
+
+  // outer walls
+  const B = WALL_T;
+  const wy = floorY + WALL_H/2;
+  if (isF1) {
+    // exit（）
+    const gs = s.exitIdx*CELL, ge = (s.exitIdx+1)*CELL;
+    const addExitWall = (side, horiz) => {
+      const isExit = side === s.exitSide;
+      const eMat = s.hasKey ? MAT.exitUnlocked : MAT.exitLocked;
+      if (horiz) {
+        const wz = (side==='N') ? 0 : W2;
+        if (!isExit) { mkBox(grp, W2+B, WALL_H, B, wMat, W2/2, wy, wz); return; }
+        if (gs>0)   mkBox(grp, gs,    WALL_H, B, wMat, gs/2,      wy, wz);
+        if (ge<W2)  mkBox(grp, W2-ge, WALL_H, B, wMat, (ge+W2)/2, wy, wz);
+        mkBox(grp, CELL, WALL_H, B, eMat, gs+CELL/2, wy, wz);
+      } else {
+        const wx = (side==='W') ? 0 : W2;
+        if (!isExit) { mkBox(grp, B, WALL_H, W2+B, wMat, wx, wy, W2/2); return; }
+        if (gs>0)   mkBox(grp, B, WALL_H, gs,    wMat, wx, wy, gs/2);
+        if (ge<W2)  mkBox(grp, B, WALL_H, W2-ge, wMat, wx, wy, (ge+W2)/2);
+        mkBox(grp, B, WALL_H, CELL, eMat, wx, wy, gs+CELL/2);
+      }
+    };
+    addExitWall('N', true); addExitWall('S', true);
+    addExitWall('W', false); addExitWall('E', false);
+    const ep = exitCenter(s);
+  } else {
+    // floor 2 outer walls fully closed
+    mkBox(grp, W2+B, WALL_H, B, wMat, W2/2, wy, 0);
+    mkBox(grp, W2+B, WALL_H, B, wMat, W2/2, wy, W2);
+    mkBox(grp, B, WALL_H, W2+B, wMat, 0, wy, W2/2);
+    mkBox(grp, B, WALL_H, W2+B, wMat, W2, wy, W2/2);
+  }
+}
+
+function buildRampGeometry(s, grp) {
+  const rp = s.rampParams;
+  const { botX, botZ, topX, topZ, RW, dir } = rp;
+
+  const wdx = (dir==='N'||dir==='S') ? 1 : 0;
+  const wdz = (dir==='N'||dir==='S') ? 0 : 1;
+  const hw = RW / 2;
+  // ceilY（ceiling），ceiling，
+  const ceilY = F1_Y + WALL_H;
+
+  // v0=bot-left(F1_Y)  v1=bot-right(F1_Y)
+  // v2=top-left-base   v3=top-right-base
+  // v4=top-left-ceil   v5=top-right-ceil
+  const P = [
+    botX-wdx*hw, F1_Y,  botZ-wdz*hw,  // 0
+    botX+wdx*hw, F1_Y,  botZ+wdz*hw,  // 1
+    topX-wdx*hw, F1_Y,  topZ-wdz*hw,  // 2
+    topX+wdx*hw, F1_Y,  topZ+wdz*hw,  // 3
+    topX-wdx*hw, ceilY, topZ-wdz*hw,  // 4
+    topX+wdx*hw, ceilY, topZ+wdz*hw,  // 5
+  ];
+
+  const idx = [
+    // bottom face removed (not visible from hole above)
+    0,1,5,  0,5,4,   // （player）
+    2,4,5,  2,5,3,   // back face (top vertical)
+    0,4,2,           // left triangle
+    1,3,5,           // right triangle
+  ];
+
+  // per-face UV unwrap (no shared vertices)
+  const TEX_W = 2.0;
+  const RL = rp.RL, RW2 = RW, H2 = F2_Y - F1_Y;
+  const slopeLen = Math.sqrt(RL*RL + H2*H2); // actual slope length along incline
+
+  // expand each face with independent UVs
+  function addFace(verts, uvs, positions, uvsArr) {
+    for (const v of verts) positions.push(...v);
+    for (const uv of uvs) uvsArr.push(...uv);
+  }
+
+  const positions = [], uvsArr = [];
+
+  // slope face (v0,v1,v5,v4) — width RW, length slopeLen
+  const su = slopeLen/TEX_W, sv = RW2/TEX_W;
+  // quad: 0,1,5,4 → two triangles 0,1,5 and 0,5,4
+  addFace([P.slice(0,3),P.slice(3,6),P.slice(15,18),P.slice(12,15)],
+          [[0,0],[sv,0],[sv,su],[0,su]], positions, uvsArr);
+  // tri1: verts 0,1,5
+  // tri2: verts 0,5,4
+  // independent UV unwrap: split quad into 2 tris
+  // slope quad vertices: A=v0,B=v1,C=v5,D=v4
+  const A=P.slice(0,3), B=P.slice(3,6), C=P.slice(15,18), D=P.slice(12,15);
+  const uvA=[0,0],uvB=[sv,0],uvC=[sv,su],uvD=[0,su];
+
+  // back face (v2,v4,v5,v3) — width RW, height ceilY-F1_Y
+  const bu = H2/TEX_W, bv = RW2/TEX_W;
+  const E=P.slice(6,9), F2=P.slice(12,15), G=P.slice(15,18), H3=P.slice(9,12);
+  const uvE=[0,0],uvF2=[0,bu],uvG=[bv,bu],uvH3=[bv,0];
+
+  // left triangle (v0,v4,v2) — ， RL， ceilY-F1_Y
+  const lu = RL/TEX_W, lv = H2/TEX_W;
+  const L0=P.slice(0,3), L4=P.slice(12,15), L2=P.slice(6,9);
+  const uvL0=[0,0], uvL4=[0,lv], uvL2=[lu,0];
+
+  // right triangle (v1,v3,v5)
+  const R1=P.slice(3,6), R3=P.slice(9,12), R5=P.slice(15,18);
+  const uvR1=[0,0], uvR3=[lu,0], uvR5=[0,lv];
+
+  const finalPos = [], finalUV = [];
+  // slope quad → 2 triangles
+  for (const [p,uv] of [[A,uvA],[B,uvB],[C,uvC]]) { finalPos.push(...p); finalUV.push(...uv); }
+  for (const [p,uv] of [[A,uvA],[C,uvC],[D,uvD]]) { finalPos.push(...p); finalUV.push(...uv); }
+  // back quad → 2 triangles
+  for (const [p,uv] of [[E,uvE],[F2,uvF2],[G,uvG]]) { finalPos.push(...p); finalUV.push(...uv); }
+  for (const [p,uv] of [[E,uvE],[G,uvG],[H3,uvH3]]) { finalPos.push(...p); finalUV.push(...uv); }
+  // left triangle
+  for (const [p,uv] of [[L0,uvL0],[L4,uvL4],[L2,uvL2]]) { finalPos.push(...p); finalUV.push(...uv); }
+  // right triangle
+  for (const [p,uv] of [[R1,uvR1],[R3,uvR3],[R5,uvR5]]) { finalPos.push(...p); finalUV.push(...uv); }
+  // bottom quad (v0,v1,v3,v2) → 2 triangles (seal interior)
+  const bot_fu = RL/TEX_W, bot_fv = RW2/TEX_W;
+  const B0=P.slice(0,3), B1=P.slice(3,6), B2=P.slice(6,9), B3=P.slice(9,12);
+  const uvB0=[0,0], uvB1=[bot_fv,0], uvB2=[0,bot_fu], uvB3=[bot_fv,bot_fu];
+  for (const [p,uv] of [[B0,uvB0],[B2,uvB2],[B3,uvB3]]) { finalPos.push(...p); finalUV.push(...uv); }
+  for (const [p,uv] of [[B0,uvB0],[B3,uvB3],[B1,uvB1]]) { finalPos.push(...p); finalUV.push(...uv); }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(finalPos), 3));
+  geo.setAttribute('uv',       new THREE.BufferAttribute(new Float32Array(finalUV),  2));
+  geo.computeVertexNormals();
+
+  // ramp mat: no global repeat (UV already world-scaled)
+  const rampMat = MAT.ramp.clone();
+  rampMat.map = MAT.ramp.map.clone();
+  rampMat.map.repeat.set(1, 1);
+  rampMat.map.needsUpdate = true;
+
+  grp.add(new THREE.Mesh(geo, rampMat));
+
+  // glowing entry strip at ramp base
+  const edgeW = (dir==='N'||dir==='S') ? RW : 0.12;
+  const edgeD = (dir==='N'||dir==='S') ? 0.12 : RW;
+  const edgeMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(edgeW, 0.12, edgeD),
+    new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0xffaa00, emissiveIntensity: 1.2 })
+  );
+  edgeMesh.position.set((P[0]+P[3])/2, F1_Y+0.06, (P[2]+P[5])/2);
+  grp.add(edgeMesh);
+
+
+}
+
+function buildKeySprite(s) {
+  if (s.keySprite) { scene.remove(s.keySprite); s.keySprite = null; }
+  if (s.hasKey) return;
+
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0,0,128,128);
+  ctx.beginPath(); ctx.arc(64,40,20,0,Math.PI*2);
+  ctx.strokeStyle='#ffe066'; ctx.lineWidth=9; ctx.stroke();
+  ctx.beginPath(); ctx.arc(64,40,9,0,Math.PI*2);
+  ctx.strokeStyle='#ffe066'; ctx.lineWidth=4; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(64,60); ctx.lineTo(64,98);
+  ctx.strokeStyle='#ffe066'; ctx.lineWidth=9; ctx.lineCap='round'; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(64,76); ctx.lineTo(76,76); ctx.lineTo(76,84); ctx.lineTo(64,84);
+  ctx.strokeStyle='#ffe066'; ctx.lineWidth=4; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(64,90); ctx.lineTo(74,90); ctx.lineTo(74,98); ctx.lineTo(64,98);
+  ctx.strokeStyle='#ffe066'; ctx.lineWidth=4; ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(c);
+  s.keySprite = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, depthTest:true}));
+  s.keySprite.scale.set(1.1, 1.1, 1);
+  s.keySprite.position.set(s.keyC*CELL+CELL/2, F2_Y+0.7, s.keyR*CELL+CELL/2);
+  scene.add(s.keySprite);
+}
+
+function buildScene(s) {
+  // clear old scene
+  if (s.sceneRoot) { scene.remove(s.sceneRoot); }
+  if (s.headLight) { scene.remove(s.headLight); }
+  clearMatCache(); // reset material cache
+
+  const root = new THREE.Group();
+  s.sceneRoot = root;
+  scene.add(root);
+
+  buildFloorGeometry(s, root, 1);
+  buildFloorGeometry(s, root, 2);
+  buildRampGeometry(s, root);
+
+  // ambient light (enough to see textures)
+  root.add(new THREE.AmbientLight(0x334466, 1.8));
+
+  // player（、）
+  s.headLight = new THREE.PointLight(0xffeedd, 4.0, 14);
+  scene.add(s.headLight);
+
+  buildKeySprite(s);
+}
+
+// ══════════════════════════════════════════════
+// player & 
+// ══════════════════════════════════════════════
+function exitCenter(s) {
+  const mid = s.exitIdx * CELL + CELL/2;
+  if (s.exitSide==='N') return {x:mid, z:0};
+  if (s.exitSide==='S') return {x:mid, z:W2};
+  if (s.exitSide==='W') return {x:0,   z:mid};
+  return {x:W2, z:mid};
+}
+
+function initPlayer(s) {
+  s.px = s.startC * CELL + CELL/2;
+  s.pz = s.startR * CELL + CELL/2;
+  const ep = exitCenter(s);
+  s.curYaw = Math.round(Math.atan2(-(ep.x-s.px), -(ep.z-s.pz)) / (Math.PI/2)) * (Math.PI/2);
+  s.tgtYaw = s.curYaw;
+  s.turning = false;
+  s.playerY = F1_Y;
+  s.currentFloor = 1;
+  applyCamera(s);
+}
+
+// floor（player）
+function getFloorY(rp, px, pz, floor) {
+  const ry = getRampSurfaceY(rp, px, pz);
+  if (ry !== null) return ry;
+  return floor === 2 ? F2_Y : F1_Y;
+}
+
+// （movement）floor
+// lateral sampling only — avoids blocking normal ramp ascent
+function getFloorYSides(rp, px, pz, floor, pdx, pdz) {
+  // pdx/pdz = lateral direction (perpendicular to movement)
+  const base = floor === 2 ? F2_Y : F1_Y;
+  const rc = getRampSurfaceY(rp, px, pz);
+  let maxY = rc !== null ? rc : base;
+  const r = PLAYER_R;
+  // left and right sides
+  for (const s of [-1, 1]) {
+    const ry = getRampSurfaceY(rp, px + pdx*r*s, pz + pdz*r*s);
+    if (ry !== null && ry > maxY) maxY = ry;
+  }
+  return maxY;
+}
+
+function getGroundY(s) {
+  return getFloorY(s.rampParams, s.px, s.pz, s.currentFloor);
+}
+
+function applyCamera(s) {
+  cam.position.set(s.px, s.playerY + EYE_H, s.pz);
+  cam.rotation.set(0, s.curYaw, 0, 'YXZ');
+  if (s.headLight) s.headLight.position.copy(cam.position);
+  updateListenerPos(s.px, s.playerY + EYE_H, s.pz, s.curYaw);
+}
+
+// ══════════════════════════════════════════════
+//  Minimap
+// ══════════════════════════════════════════════
+const mmEl = document.getElementById('minimap');
+const MC = Math.max(8, Math.min(11, Math.floor(innerWidth * 0.016)));  // px per cell, 8~11px
+const MS2 = MC * GRID;
+mmEl.width = mmEl.height = MS2;
+mmEl.style.width = mmEl.style.height = MS2 + 'px';
+const mc = mmEl.getContext('2d');
+
+function drawMinimap(s) {
+  mc.fillStyle = '#030810';
+  mc.fillRect(0, 0, MS2, MS2);
+  const HW = Math.max(1, MC * 0.08);
+  // cell background
+  mc.fillStyle = '#0a1520';
+  for (let r=0;r<GRID;r++) for (let c=0;c<GRID;c++)
+    mc.fillRect(c*MC+HW, r*MC+HW, MC-HW*2, MC-HW*2);
+
+  const isF2 = s.currentFloor === 2;
+  const hWall = isF2 ? s.hWall2 : s.hWall1;
+  const vWall = isF2 ? s.vWall2 : s.vWall1;
+  mc.fillStyle = isF2 ? '#5a3a7a' : '#2a4a6a';
+  for (let r=0;r<GRID-1;r++) for (let c=0;c<GRID;c++)
+    if (hWall[r][c]) mc.fillRect(c*MC, (r+1)*MC-HW, MC, HW*2);
+  for (let r=0;r<GRID;r++) for (let c=0;c<GRID-1;c++)
+    if (vWall[r][c]) mc.fillRect((c+1)*MC-HW, r*MC, HW*2, MC);
+  // outer walls
+  mc.fillRect(0,0,MS2,HW); mc.fillRect(0,MS2-HW,MS2,HW);
+  mc.fillRect(0,0,HW,MS2); mc.fillRect(MS2-HW,0,HW,MS2);
+
+  // exit (floor 1)
+  if (!isF2) {
+    mc.fillStyle = s.hasKey ? '#44bb77' : '#aa4433';
+    const gs = s.exitIdx*MC, ge = (s.exitIdx+1)*MC;
+    if (s.exitSide==='N') mc.fillRect(gs,0,ge-gs,HW*2.5);
+    if (s.exitSide==='S') mc.fillRect(gs,MS2-HW*2.5,ge-gs,HW*2.5);
+    if (s.exitSide==='W') mc.fillRect(0,gs,HW*2.5,ge-gs);
+    if (s.exitSide==='E') mc.fillRect(MS2-HW*2.5,gs,HW*2.5,ge-gs);
+  }
+
+  // stairwell marker
+  mc.fillStyle = '#ffaa44';
+  const scx = s.stairC*MC+MC/2, scz = s.stairR*MC+MC/2;
+  mc.beginPath(); mc.arc(scx, scz, MC*0.28, 0, Math.PI*2); mc.fill();
+
+  // key (floor 2)
+  if (isF2 && !s.hasKey) {
+    mc.fillStyle = '#ffdd00';
+    const kx = s.keyC*MC+MC/2, kz = s.keyR*MC+MC/2;
+    mc.beginPath(); mc.arc(kx, kz, MC*0.24, 0, Math.PI*2);
+    mc.fill();
+    mc.strokeStyle='#ffaa00'; mc.lineWidth=1.5; mc.stroke();
+  }
+
+  // player arrow
+  const mpx = s.px/CELL*MC, mpz = s.pz/CELL*MC;
+  mc.fillStyle = '#ffff44';
+  mc.beginPath(); mc.arc(mpx, mpz, MC*0.3, 0, Math.PI*2); mc.fill();
+  const adx = -Math.sin(s.curYaw), adz = -Math.cos(s.curYaw);
+  mc.strokeStyle = '#ffee00'; mc.lineWidth = 1.5;
+  mc.beginPath(); mc.moveTo(mpx, mpz);
+  mc.lineTo(mpx + adx*MC*0.6, mpz + adz*MC*0.6); mc.stroke();
+
+  // floor label
+  mc.fillStyle = isF2 ? '#cc88ff' : '#00ccff';
+  mc.font = `${Math.floor(MC*0.85)}px 'Courier Prime', monospace`;
+  mc.textAlign = 'left'; mc.textBaseline = 'top';
+  mc.fillText(s.currentFloor+'F', 3, 3);
+}
+
+// ══════════════════════════════════════════════
+//  Input
+// ══════════════════════════════════════════════
+const keys = {};
+document.addEventListener('keydown', e => {
+  if (!state || state.won) return;
+  if (e.code === 'ArrowLeft' && !state.turning) {
+    state.tgtYaw = state.curYaw + Math.PI/2; state.turning = true; e.preventDefault();
+  } else if (e.code === 'ArrowRight' && !state.turning) {
+    state.tgtYaw = state.curYaw - Math.PI/2; state.turning = true; e.preventDefault();
+  } else if (e.code === 'KeyE') {
+    // pick up key
+    if (!state.hasKey && state.currentFloor === 2) {
+      const dx = state.px - (state.keyC*CELL+CELL/2);
+      const dz = state.pz - (state.keyR*CELL+CELL/2);
+      if (Math.sqrt(dx*dx+dz*dz) < KEY_R + PLAYER_R + 0.15) {
+        pickupKey();
+      }
+    }
+    e.preventDefault();
+  } else {
+    keys[e.code] = true;
+    if (['KeyW','KeyS','KeyA','KeyD'].includes(e.code)) e.preventDefault();
+  }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+function pickupKey() {
+  state.hasKey = true;
+  removeKeyWall(state);
+  if (state.keySprite) { scene.remove(state.keySprite); state.keySprite = null; }
+  document.getElementById('keyStatus').textContent = '🔓 Key Found';
+  document.getElementById('keyStatus').style.color = '#00ff88';
+  // exit（）
+  rebuildExitWall();
+  // （exit）
+  state.walls1 = buildCollisionWalls(state.hWall1, state.vWall1, state.exitSide, state.exitIdx, false);
+}
+
+function rebuildExitWall() {
+  // exit，：
+  buildScene(state);
+}
+
+// ══════════════════════════════════════════════
+//  Main Loop
+// ══════════════════════════════════════════════
+let lastTime = performance.now();
+let frameCount = 0;
+
+// cache DOM refs to avoid per-frame querySelector
+const elTimer   = document.getElementById('timerTxt');
+const elPrompt  = document.getElementById('prompt');
+const elFloor   = document.getElementById('floorTxt');
+
+function loop() {
+  requestAnimationFrame(loop);
+  applyJoystickToKeys();
+  frameCount++;
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  if (!state || state.won) {
+    renderer.render(scene, cam);
+    return;
+  }
+
+  // timer
+  elTimer.textContent = fmtTime(Date.now() - state.startTime);
+
+  // turning
+  if (state.turning) {
+    let d = state.tgtYaw - state.curYaw;
+    while (d > Math.PI)  d -= Math.PI*2;
+    while (d < -Math.PI) d += Math.PI*2;
+    const step = TURN_SPD * dt;
+    if (Math.abs(d) <= step) { state.curYaw = state.tgtYaw; state.turning = false; }
+    else state.curYaw += Math.sign(d) * step;
+  }
+
+  // movement
+  if (!state.turning) {
+    const fdx = -Math.sin(state.curYaw), fdz = -Math.cos(state.curYaw);
+    const rfx = -fdz, rfz = fdx;
+    let mx = 0, mz = 0;
+    if (keys['KeyW']) { mx += fdx; mz += fdz; }
+    if (keys['KeyS']) { mx -= fdx; mz -= fdz; }
+    if (keys['KeyA']) { mx -= rfx; mz -= rfz; }
+    if (keys['KeyD']) { mx += rfx; mz += rfz; }
+
+    if (mx !== 0 || mz !== 0) {
+      const len = Math.sqrt(mx*mx + mz*mz);
+      const sx = mx/len * SPD * dt;
+      const sz = mz/len * SPD * dt;
+
+      // current floor collision walls
+      const walls = state.currentFloor === 1 ? state.walls1 : state.walls2;
+
+      const nx = state.px + sx, nz = state.pz + sz;
+      // XZ wall collision
+      let npx = state.px, npz = state.pz;
+      if      (!collidesWalls(nx, nz, walls)) { npx = nx; npz = nz; }
+      else if (!collidesWalls(nx, state.pz, walls)) { npx = nx; }
+      else if (!collidesWalls(state.px, nz, walls)) { npz = nz; }
+
+      // Y ：floor STEP_H，movement
+      // blocks side/back ramp entry (sudden height jump)
+      const STEP_H = 0.28;
+      const curFloorY = getFloorY(state.rampParams, state.px, state.pz, state.currentFloor);
+      // movement（）
+      const mlen = Math.sqrt(sx*sx+sz*sz) || 1;
+      const pdx = -sz/mlen, pdz = sx/mlen; // movement
+      // target Y: center + max of lateral samples
+      const newFloorY = getFloorYSides(state.rampParams, npx, npz, state.currentFloor, pdx, pdz);
+      if (newFloorY - curFloorY > STEP_H) {
+        const newFloorYx = getFloorYSides(state.rampParams, npx, state.pz, state.currentFloor, pdx, pdz);
+        const newFloorYz = getFloorYSides(state.rampParams, state.px, npz, state.currentFloor, pdx, pdz);
+        npx = (newFloorYx - curFloorY <= STEP_H) ? npx : state.px;
+        npz = (newFloorYz - curFloorY <= STEP_H) ? npz : state.pz;
+      }
+      state.px = npx; state.pz = npz;
+    }
+  }
+
+  // floorY （）
+  const targetY = getGroundY(state);
+  state.playerY += (targetY - state.playerY) * 0.2;
+
+  // ：player Y （Minimap）
+  const midY = (F1_Y + F2_Y) / 2;
+  const newFloor = state.playerY > midY ? 2 : 1;
+  if (newFloor !== state.currentFloor) {
+    state.currentFloor = newFloor;
+    elFloor.textContent = 'F' + state.currentFloor;
+  }
+
+  applyCamera(state);
+
+  // key float animation
+  if (state.keySprite) {
+    state.keySprite.position.y = F2_Y + 0.6 + Math.sin(Date.now() * 0.0022) * 0.18;
+  }
+
+  // prompts
+  updatePrompt(state);
+
+  // win detection
+  if (state.hasKey && state.currentFloor === 1) {
+    const { exitSide } = state;
+    if ((exitSide==='N' && state.pz < -0.3) ||
+        (exitSide==='S' && state.pz > W2+0.3) ||
+        (exitSide==='W' && state.px < -0.3) ||
+        (exitSide==='E' && state.px > W2+0.3)) {
+      triggerWin();
+    }
+  }
+
+  if (frameCount % 4 === 0) drawMinimap(state);
+  renderer.render(scene, cam);
+}
+
+function updatePrompt(s) {
+  const el = elPrompt;
+  let hint = '';
+
+  // prompts
+  const rp = s.rampParams;
+  const dx = s.px - rp.cx, dz = s.pz - rp.cz;
+  if (Math.sqrt(dx*dx+dz*dz) < CELL * 0.45) {
+    hint = s.currentFloor === 1 ? 'Ramp → Floor 2 ↑' : 'Ramp → Floor 1 ↓';
+  }
+
+  // prompts
+  if (!s.hasKey && s.currentFloor === 2) {
+    const kx = s.px-(s.keyC*CELL+CELL/2), kz = s.pz-(s.keyR*CELL+CELL/2);
+    if (Math.sqrt(kx*kx+kz*kz) < KEY_R + PLAYER_R + 0.15) hint = 'Press E to Pick Up Key 🔑';
+  }
+
+  el.textContent = hint;
+  el.style.display = hint ? 'block' : 'none';
+  // movement
+  const nearKey = !s.hasKey && s.currentFloor === 2 && (() => {
+    const kx = s.px-(s.keyC*CELL+CELL/2), kz = s.pz-(s.keyR*CELL+CELL/2);
+    return Math.sqrt(kx*kx+kz*kz) < KEY_R + PLAYER_R + 0.15;
+  })();
+  updatePickupBtn(nearKey);
+}
+
+function triggerWin() {
+  state.won = true;
+  stopStairMusic();
+  // dynamically create win overlay
+  const ws = document.createElement('div');
+  ws.id = 'winScreen';
+  ws.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+    'gap:16px;position:fixed;inset:0;background:#000d;color:#fff;z-index:50;';
+  ws.innerHTML = '<div class="big">🎉 Escaped!</div>' +
+    '<p>Time: <span style="color:#0f0">' + fmtTime(Date.now() - state.startTime) + '</span></p>' +
+    '<button class="btn" id="btnWinBack">↩ Main Menu</button>';
+  document.body.appendChild(ws);
+  document.getElementById('btnWinBack').addEventListener('click', goHome);
+  document.getElementById('btnWinBack').addEventListener('touchend', e => {
+    e.preventDefault(); e.stopPropagation(); goHome();
+  }, { passive: false });
+}
+
+function fmtTime(ms) {
+  const s = Math.floor(ms/1000), m = Math.floor(s/60);
+  return `${String(m).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+}
+
+// ══════════════════════════════════════════════
+//  Game Flow
+// ══════════════════════════════════════════════
+function startGame() {
+  // clean up old scene
+  if (state && state.sceneRoot) scene.remove(state.sceneRoot);
+  if (state && state.headLight) scene.remove(state.headLight);
+  if (state && state.keySprite) scene.remove(state.keySprite);
+
+  state = initState();
+  setupMaze(state);
+  state.walls1 = buildCollisionWalls(state.hWall1, state.vWall1, state.exitSide, state.exitIdx, true);
+  state.walls2 = buildCollisionWalls(state.hWall2, state.vWall2, 'N', 0, true); // exit
+  // key collision box (before pickup)
+  addKeyWall(state);
+
+  buildScene(state);
+  initPlayer(state);
+
+  startStairMusic(
+    state.stairC * CELL + CELL / 2,
+    (F1_Y + F2_Y) / 2,
+    state.stairR * CELL + CELL / 2
+  );
+
+  state.startTime = Date.now();
+  document.getElementById('keyStatus').textContent = '🔒 No Key';
+  document.getElementById('keyStatus').style.color = '#ff4444';
+  document.getElementById('floorTxt').textContent = 'F1';
+  document.getElementById('prompt').style.display = 'none';
+}
+
+function goHome() {
+  stopStairMusic();
+  document.getElementById('touchUI').style.display = 'none';
+  const ws = document.getElementById('winScreen');
+  if (ws) ws.remove();
+  // state=null Main Loop（wonreturn）
+  if (state && state.sceneRoot) scene.remove(state.sceneRoot);
+  if (state && state.headLight) scene.remove(state.headLight);
+  if (state && state.keySprite) scene.remove(state.keySprite);
+  state = null;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+function doStartGame() {
+  document.getElementById('overlay').style.display = 'none';
+  if (isMobile) document.getElementById('touchUI').style.display = 'block';
+  getSfxCtx().resume();
+  startGame();
+}
+document.getElementById('btnStart').addEventListener('click', doStartGame);
+document.getElementById('btnStart').addEventListener('touchend', e => {
+  e.preventDefault(); e.stopPropagation(); doStartGame();
+}, { passive: false });
+document.getElementById('btnBack').addEventListener('click', goHome);
+document.getElementById('btnBack').addEventListener('touchend', e => {
+  e.stopPropagation(); goHome();
+}, { passive: false });
+
+loop();
+</script>
+</body>
+</html>
