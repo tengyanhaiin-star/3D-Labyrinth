@@ -49,8 +49,6 @@ The joystick is floating — touch anywhere in the left zone to anchor it. Touch
 
 ## License
 
-Game code: MIT.
-
-Three.js: MIT — © 2010–2024 three.js authors.
-
-Fonts served via Google Fonts under their respective open licenses (Courier Prime: OFL, Inter: OFL).
+- Game code: MIT.
+- Three.js: MIT — © 2010–2024 three.js authors.
+- Fonts served via Google Fonts under their respective open licenses (Courier Prime: OFL, Inter: OFL).
